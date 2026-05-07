@@ -1,11 +1,8 @@
-// api.js — instância Axios para integração futura com o backend
-// Ativar quando o backend Spring Boot estiver rodando em localhost:8080
-
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080',
-  timeout: 10000,
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'https://backend-sistema-horas-complementares.onrender.com',
+  timeout: 15000,
 });
 
 api.interceptors.request.use((config) => {

@@ -38,7 +38,7 @@ export function ValidarCertificadosPage() {
       } else {
         await reprovarCertificado(modal.cert.id, obs);
         setCertificados(prev =>
-          prev.map(c => c.id === modal.cert.id ? { ...c, statusValidacao: "REPROVADO", observacao: obs } : c)
+          prev.map(c => c.id === modal.cert.id ? { ...c, statusValidacao: "RECUSADO", observacao: obs } : c)
         );
         toast.success("Certificado reprovado.");
       }
@@ -65,7 +65,7 @@ export function ValidarCertificadosPage() {
         {[
           { label: "Pendentes",  valor: pendentes.length,  icon: Clock,        iconCls: "text-amber-600", bgCls: "bg-amber-50"  },
           { label: "Aprovados",  valor: historico.filter(c => c.statusValidacao === "APROVADO").length,  icon: CheckCircle, iconCls: "text-green-600", bgCls: "bg-green-50" },
-          { label: "Reprovados", valor: historico.filter(c => c.statusValidacao === "REPROVADO").length, icon: XCircle,     iconCls: "text-red-500",   bgCls: "bg-red-50"   },
+          { label: "Recusados", valor: historico.filter(c => c.statusValidacao === "RECUSADO").length, icon: XCircle,     iconCls: "text-red-500",   bgCls: "bg-red-50"   },
         ].map((c, i) => (
           <motion.div
             key={c.label}
@@ -118,7 +118,7 @@ export function ValidarCertificadosPage() {
                 {pendentes.map(cert => (
                   <tr key={cert.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-5 py-4 font-medium text-slate-700">{cert.nomeAluno}</td>
-                    <td className="px-5 py-4 text-slate-600 max-w-[200px] truncate">{cert.tituloAtividade}</td>
+                    <td className="px-5 py-4 text-slate-600 max-w-50 truncate">{cert.tituloAtividade}</td>
                     <td className="px-5 py-4 text-slate-500">{cert.nomeArea}</td>
                     <td className="px-5 py-4 text-slate-500">{cert.dataEnvio}</td>
                     <td className="px-5 py-4 font-medium text-slate-700">{cert.cargaHorariaInformada}h</td>
@@ -172,7 +172,7 @@ export function ValidarCertificadosPage() {
                 return (
                   <tr key={cert.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-5 py-4 font-medium text-slate-700">{cert.nomeAluno}</td>
-                    <td className="px-5 py-4 text-slate-600 max-w-[200px] truncate">{cert.tituloAtividade}</td>
+                    <td className="px-5 py-4 text-slate-600 max-w-50 truncate">{cert.tituloAtividade}</td>
                     <td className="px-5 py-4 text-slate-500">{cert.nomeArea}</td>
                     <td className="px-5 py-4">
                       <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${s.className}`}>

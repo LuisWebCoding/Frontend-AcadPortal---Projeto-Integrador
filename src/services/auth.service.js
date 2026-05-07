@@ -1,11 +1,13 @@
-import { MOCK_USUARIOS } from './mock';
+import api from './api';
 
 export async function login(email, senha) {
-  const u = MOCK_USUARIOS.find(x => x.email === email && x.senha === senha);
-  if (!u) throw new Error('Credenciais invalidas');
-  const data = { token: 'mock-token-' + u.id, perfil: u.perfil, nome: u.nome, id: u.id };
+  const { data } = await api.post('/api/auth/login', { email, senha });
+  // response: { token, perfil, nome }
   localStorage.setItem('token', data.token);
-  localStorage.setItem('usuario', JSON.stringify({ id: u.id, nome: data.nome, perfil: data.perfil }));
+  localStorage.setItem('usuario', JSON.stringify({
+    nome: data.nome,
+    perfil: data.perfil  // "ALUNO" ou "COORDENADOR"
+  }));
   return data;
 }
 

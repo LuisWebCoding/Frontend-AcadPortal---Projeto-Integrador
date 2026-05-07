@@ -1,25 +1,60 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Upload, FileText, CheckCircle, Clock, XCircle } from "lucide-react";
-import { mockCertificados, mockAreas } from "@/services/mock";
+import { Upload, FileText, CheckCircle, Clock, Loader2 } from "lucide-react";
+import { listarMeusCertificados, enviarCertificado, listarAreas } from "@/services/certificado.service";
 import toast from "react-hot-toast";
 
 const STATUS = {
-  APROVADO:  { label: "Aprovado",  className: "bg-green-100 text-green-700" },
-  REPROVADO: { label: "Reprovado", className: "bg-red-100 text-red-700"     },
+  APROVADO: { label: "Aprovado", className: "bg-green-100 text-green-700" },
+  RECUSADO: { label: "Recusado", className: "bg-red-100 text-red-700" },
+  PENDENTE: { label: "Pendente", className: "bg-amber-100 text-amber-700" },
 };
-const getStatus = (s) => s ? (STATUS[s] ?? { label: s, className: "bg-slate-100 text-slate-600" }) : { label: "Pendente", className: "bg-amber-100 text-amber-700" };
+const getStatus = (s) =>
+  s ? (STATUS[s] ?? { label: s, className: "bg-slate-100 text-slate-600" })
+    : { label: "Pendente", className: "bg-amber-100 text-amber-700" };
+
+const META = 100;
 
 export function HorasComplementaresPage() {
-  const [certs, setCerts]         = useState(mockCertificados);
-  const [arquivo, setArquivo]     = useState(null);
-  const [enviando, setEnviando]   = useState(false);
-  const [form, setForm] = useState({ tituloAtividade: "", cargaHorariaInformada: "", dataAtividade: "", idArea: "" });
+  const [certs, setCerts]           = useState([]);
+  const [resumo, setResumo]         = useState(null);
+  const [carregando, setCarregando] = useState(true);
+  const [arquivo, setArquivo]       = useState(null);
+  const [enviando, setEnviando]     = useState(false);
+  const [areas, setAreas]           = useState([]);
+  const [form, setForm] = useState({
+    tituloAtividade: "",
+    cargaHorariaInformada: "",
+    dataAtividade: "",
+    areaId: "",
+  });
 
-  const horasAprovadas = certs.filter(c => c.statusValidacao === "APROVADO").reduce((a, c) => a + Number(c.cargaHorariaInformada), 0);
-  const horasPendentes = certs.filter(c => !c.statusValidacao).reduce((a, c) => a + Number(c.cargaHorariaInformada), 0);
-  const META = 200;
-  const pct  = Math.min(100, Math.round((horasAprovadas / META) * 100));
+  // Função auxiliar para atualizar certs e resumo a partir da resposta
+  const atualizarLista = (res) => {
+    setCerts(Array.isArray(res) ? res : (res?.certificados ?? []));
+    setResumo(res?.resumo ?? null);
+  };
+
+  useEffect(() => {
+    listarMeusCertificados()
+      .then(atualizarLista)
+      .catch(() => toast.error("Erro ao carregar certificados."))
+      .finally(() => setCarregando(false));
+  }, []);
+
+  useEffect(() => {
+    listarAreas()
+      .then(setAreas)
+      .catch(() => toast.error("Erro ao carregar áreas."));
+  }, []);
+
+  const horasAprovadas = resumo?.horasValidadas ?? 0;
+
+  const horasPendentes = certs
+    .filter(c => !c.validacao?.status || c.validacao.status === "PENDENTE")
+    .reduce((a, c) => a + Number(c.cargaHorariaInformada), 0);
+
+  const pct = Math.min(100, Math.round((horasAprovadas / META) * 100));
 
   const handleForm = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
@@ -27,22 +62,30 @@ export function HorasComplementaresPage() {
     e.preventDefault();
     if (!arquivo) { toast.error("Selecione um arquivo"); return; }
     setEnviando(true);
-    await new Promise(r => setTimeout(r, 700));
-    const area = mockAreas.find(a => a.id === Number(form.idArea));
-    setCerts(prev => [{
-      id: Date.now(), ...form,
-      cargaHorariaInformada: Number(form.cargaHorariaInformada),
-      dataEnvio: new Date().toISOString().split("T")[0],
-      nomeAluno: "Ana Clara Rodrigues",
-      statusValidacao: null,
-      nomeArea: area?.nome ?? "",
-      observacao: null,
-    }, ...prev]);
-    setForm({ tituloAtividade: "", cargaHorariaInformada: "", dataAtividade: "", idArea: "" });
-    setArquivo(null);
-    setEnviando(false);
-    toast.success("Certificado enviado com sucesso!");
+    try {
+      await enviarCertificado(
+        {
+          ...form,
+          areaId: Number(form.areaId),
+          cargaHorariaInformada: Number(form.cargaHorariaInformada),
+        },
+        arquivo
+      );
+      const res = await listarMeusCertificados();
+      atualizarLista(res); // ← usa a mesma função auxiliar, nunca quebra
+      setForm({ tituloAtividade: "", cargaHorariaInformada: "", dataAtividade: "", areaId: "" });
+      setArquivo(null);
+      toast.success("Certificado enviado com sucesso!");
+    } catch (err) {
+      toast.error(err?.response?.data?.erro ?? "Erro ao enviar certificado.");
+    } finally {
+      setEnviando(false);
+    }
   };
+
+  const nomeArea   = (cert) => cert.area?.nome ?? "—";
+  const statusVal  = (cert) => cert.validacao?.status ?? null;
+  const observacao = (cert) => cert.validacao?.observacao ?? null;
 
   return (
     <div className="space-y-6">
@@ -51,12 +94,12 @@ export function HorasComplementaresPage() {
         <p className="text-slate-500 text-sm mt-1">Envie seus certificados e acompanhe a validação.</p>
       </div>
 
-      {/* Cards */}
+      {/* Cards métricas */}
       <div className="grid grid-cols-3 gap-4">
         {[
           { label: "Horas Aprovadas", valor: `${horasAprovadas}h`, icon: CheckCircle, cls: "text-green-600", bg: "bg-green-50" },
-          { label: "Horas Pendentes", valor: `${horasPendentes}h`, icon: Clock,        cls: "text-amber-600", bg: "bg-amber-50" },
-          { label: "Meta do Curso",   valor: `${META}h`,           icon: FileText,     cls: "text-[#004587]", bg: "bg-blue-50" },
+          { label: "Horas Pendentes", valor: `${horasPendentes}h`, icon: Clock,       cls: "text-amber-600", bg: "bg-amber-50" },
+          { label: "Meta do Curso",   valor: `${META}h`,           icon: FileText,    cls: "text-[#004587]", bg: "bg-blue-50"  },
         ].map((c, i) => (
           <motion.div key={c.label} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
             className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm flex items-center gap-4">
@@ -104,10 +147,10 @@ export function HorasComplementaresPage() {
             ))}
             <div>
               <label className="text-xs font-medium text-slate-600 block mb-1.5">Área de Atividade</label>
-              <select required name="idArea" value={form.idArea} onChange={handleForm}
+              <select required name="areaId" value={form.areaId} onChange={handleForm}
                 className="w-full h-10 px-3 rounded-lg border border-slate-200 bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-[#004587] focus:border-transparent">
                 <option value="">Selecione uma área</option>
-                {mockAreas.map(a => <option key={a.id} value={a.id}>{a.nome}</option>)}
+                {areas.map(a => <option key={a.id} value={a.id}>{a.nome}</option>)}
               </select>
             </div>
           </div>
@@ -124,7 +167,9 @@ export function HorasComplementaresPage() {
 
           <button type="submit" disabled={enviando}
             className="px-6 py-2.5 bg-[#004587] hover:bg-[#003566] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center gap-2">
-            {enviando ? "Enviando..." : <><Upload className="h-4 w-4" /> Enviar Certificado</>}
+            {enviando
+              ? <><Loader2 className="h-4 w-4 animate-spin" /> Enviando...</>
+              : <><Upload className="h-4 w-4" /> Enviar Certificado</>}
           </button>
         </form>
       </motion.div>
@@ -133,36 +178,53 @@ export function HorasComplementaresPage() {
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}
         className="bg-white rounded-xl border border-slate-100 shadow-sm">
         <div className="p-5 border-b border-slate-50">
-          <h2 className="text-base font-semibold text-slate-800">Certificados Enviados ({certs.length})</h2>
+          <h2 className="text-base font-semibold text-slate-800">
+            Certificados Enviados {!carregando && `(${certs.length})`}
+          </h2>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-50">
-                {["Título", "Área", "Data de Envio", "Horas", "Status", "Observação"].map(h => (
-                  <th key={h} className="px-5 py-3 text-left text-xs font-medium text-slate-500">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {certs.map(cert => {
-                const s = getStatus(cert.statusValidacao);
-                return (
-                  <tr key={cert.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-5 py-4 font-medium text-slate-700">{cert.tituloAtividade}</td>
-                    <td className="px-5 py-4 text-slate-500">{cert.nomeArea}</td>
-                    <td className="px-5 py-4 text-slate-500">{cert.dataEnvio}</td>
-                    <td className="px-5 py-4 font-medium">{cert.cargaHorariaInformada}h</td>
-                    <td className="px-5 py-4">
-                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${s.className}`}>{s.label}</span>
-                    </td>
-                    <td className="px-5 py-4 text-slate-400 text-xs">{cert.observacao ?? "—"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+
+        {carregando ? (
+          <div className="flex items-center justify-center p-10 gap-2 text-slate-400">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="text-sm">Carregando...</span>
+          </div>
+        ) : certs.length === 0 ? (
+          <div className="p-10 text-center text-slate-400 text-sm">
+            Nenhum certificado enviado ainda.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-50">
+                  {["Título", "Área", "Data de Envio", "Horas", "Status", "Observação"].map(h => (
+                    <th key={h} className="px-5 py-3 text-left text-xs font-medium text-slate-500">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {certs.map(cert => {
+                  const s = getStatus(statusVal(cert));
+                  const dataEnvio = cert.dataEnvio
+                    ? new Date(cert.dataEnvio).toLocaleDateString("pt-BR")
+                    : "—";
+                  return (
+                    <tr key={cert.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-5 py-4 font-medium text-slate-700">{cert.tituloAtividade}</td>
+                      <td className="px-5 py-4 text-slate-500">{nomeArea(cert)}</td>
+                      <td className="px-5 py-4 text-slate-500">{dataEnvio}</td>
+                      <td className="px-5 py-4 font-medium">{cert.cargaHorariaInformada}h</td>
+                      <td className="px-5 py-4">
+                        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${s.className}`}>{s.label}</span>
+                      </td>
+                      <td className="px-5 py-4 text-slate-400 text-xs">{observacao(cert) ?? "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </motion.div>
     </div>
   );

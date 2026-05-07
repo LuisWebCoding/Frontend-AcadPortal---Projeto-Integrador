@@ -6,4 +6,4 @@ export const aprovarCertificado = (id, horasValidadas, observacao = '') =>
   validarCertificado(id, { status: 'APROVADO', horasValidadas, observacao });
 
 export const reprovarCertificado = (id, observacao) =>
-  validarCertificado(id, { status: 'REPROVADO', observacao, horasValidadas: 0 });
+  validarCertificado(id, { status: 'RECUSADO', observacao, horasValidadas: 0 });
