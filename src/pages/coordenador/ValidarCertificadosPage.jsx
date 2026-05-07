@@ -1,56 +1,108 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ShieldCheck, Clock, CheckCircle, XCircle, FileText, X, Loader2 } from "lucide-react";
-import { mockTodosCertificados } from "@/services/mock";
-import { aprovarCertificado, reprovarCertificado } from "@/services/validacao.service";
+import { listarPendentes, validarCertificado } from "@/services/certificado.service";
 import toast from "react-hot-toast";
 
 const STATUS = {
   APROVADO:  { label: "Aprovado",  className: "bg-green-100 text-green-700"  },
+  RECUSADO:  { label: "Recusado",  className: "bg-red-100 text-red-700"      },
   REPROVADO: { label: "Reprovado", className: "bg-red-100 text-red-700"      },
 };
 const getStatus = (s) =>
   s ? (STATUS[s] ?? { label: s, className: "bg-slate-100 text-slate-600" })
     : { label: "Pendente", className: "bg-amber-100 text-amber-700" };
 
-export function ValidarCertificadosPage() {
-  const [certificados, setCertificados] = useState(mockTodosCertificados);
-  const [modal, setModal]     = useState(null); // { tipo: 'aprovar'|'reprovar', cert }
-  const [horas, setHoras]     = useState("");
-  const [obs, setObs]         = useState("");
-  const [loading, setLoading] = useState(false);
+// Normaliza o objeto vindo do backend para o formato usado internamente
+function normalizarCertificado(c) {
+  return {
+    id:                    c.id,
+    tituloAtividade:       c.tituloAtividade,
+    cargaHorariaInformada: c.cargaHorariaInformada,
+    // dataEnvio pode vir como string ISO ou já formatada
+    dataEnvio:             c.dataEnvio
+      ? new Date(c.dataEnvio).toLocaleDateString("pt-BR")
+      : "—",
+    // nomeAluno pode vir aninhado em "aluno.nome" dependendo do backend
+    nomeAluno:             c.nomeAluno ?? c.aluno?.nome ?? "—",
+    nomeArea:              c.nomeArea  ?? c.area?.nome  ?? "—",
+    // statusValidacao pode vir em c.validacao.status ou c.statusValidacao
+    statusValidacao:       c.statusValidacao ?? c.validacao?.status ?? null,
+    observacao:            c.observacao      ?? c.validacao?.observacao ?? null,
+  };
+}
 
-  const pendentes = certificados.filter(c => !c.statusValidacao);
-  const historico = certificados.filter(c =>  c.statusValidacao);
+export function ValidarCertificadosPage() {
+  const [pendentes,  setPendentes]  = useState([]);
+  const [historico,  setHistorico]  = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [modal,      setModal]      = useState(null); // { tipo: 'aprovar'|'reprovar', cert }
+  const [horas,      setHoras]      = useState("");
+  const [obs,        setObs]        = useState("");
+  const [loading,    setLoading]    = useState(false);
+
+  // ── Carrega pendentes do backend ──────────────────────────────
+  useEffect(() => {
+    const carregar = async () => {
+      try {
+        const dados = await listarPendentes();
+        // A rota /pendentes retorna somente os pendentes
+        const lista = Array.isArray(dados)
+          ? dados
+          : (dados?.certificados ?? dados?.pendentes ?? []);
+        setPendentes(lista.map(normalizarCertificado));
+      } catch {
+        toast.error("Erro ao carregar certificados pendentes.");
+      } finally {
+        setCarregando(false);
+      }
+    };
+    carregar();
+  }, []);
 
   function abrirModal(tipo, cert) { setModal({ tipo, cert }); setHoras(""); setObs(""); }
-  function fecharModal() { setModal(null); }
+  function fecharModal()          { setModal(null); }
 
   async function confirmar() {
     setLoading(true);
     try {
       if (modal.tipo === "aprovar") {
-        await aprovarCertificado(modal.cert.id, Number(horas), obs);
-        setCertificados(prev =>
-          prev.map(c => c.id === modal.cert.id ? { ...c, statusValidacao: "APROVADO", observacao: obs } : c)
-        );
+        // PATCH /api/certificados/:id/validar  { status: 'APROVADO', horasValidadas }
+        await validarCertificado(modal.cert.id, "APROVADO", Number(horas));
+        const aprovado = { ...modal.cert, statusValidacao: "APROVADO", observacao: obs || null };
+        setPendentes(prev => prev.filter(c => c.id !== modal.cert.id));
+        setHistorico(prev => [aprovado, ...prev]);
         toast.success("Certificado aprovado!");
       } else {
-        await reprovarCertificado(modal.cert.id, obs);
-        setCertificados(prev =>
-          prev.map(c => c.id === modal.cert.id ? { ...c, statusValidacao: "RECUSADO", observacao: obs } : c)
-        );
+        // PATCH /api/certificados/:id/validar  { status: 'RECUSADO', horasValidadas: 0 }
+        await validarCertificado(modal.cert.id, "RECUSADO", 0);
+        const recusado = { ...modal.cert, statusValidacao: "RECUSADO", observacao: obs };
+        setPendentes(prev => prev.filter(c => c.id !== modal.cert.id));
+        setHistorico(prev => [recusado, ...prev]);
         toast.success("Certificado reprovado.");
       }
       fecharModal();
     } catch {
-      toast.error("Erro ao processar.");
+      toast.error("Erro ao processar. Tente novamente.");
     }
     setLoading(false);
   }
 
   const canConfirm = modal && !loading &&
     (modal.tipo === "aprovar" ? !!horas : !!obs);
+
+  // ── Loading inicial ───────────────────────────────────────────
+  if (carregando) {
+    return (
+      <div className="flex items-center justify-center h-64 gap-2 text-slate-400">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        <span className="text-sm">Carregando certificados...</span>
+      </div>
+    );
+  }
+
+  const totalAprovados = historico.filter(c => c.statusValidacao === "APROVADO").length;
+  const totalRecusados = historico.filter(c => c.statusValidacao === "RECUSADO" || c.statusValidacao === "REPROVADO").length;
 
   return (
     <div className="space-y-6">
@@ -63,9 +115,9 @@ export function ValidarCertificadosPage() {
       {/* Cards de resumo */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
-          { label: "Pendentes",  valor: pendentes.length,  icon: Clock,        iconCls: "text-amber-600", bgCls: "bg-amber-50"  },
-          { label: "Aprovados",  valor: historico.filter(c => c.statusValidacao === "APROVADO").length,  icon: CheckCircle, iconCls: "text-green-600", bgCls: "bg-green-50" },
-          { label: "Recusados", valor: historico.filter(c => c.statusValidacao === "RECUSADO").length, icon: XCircle,     iconCls: "text-red-500",   bgCls: "bg-red-50"   },
+          { label: "Pendentes",  valor: pendentes.length, icon: Clock,        iconCls: "text-amber-600", bgCls: "bg-amber-50"  },
+          { label: "Aprovados",  valor: totalAprovados,   icon: CheckCircle,  iconCls: "text-green-600", bgCls: "bg-green-50"  },
+          { label: "Recusados",  valor: totalRecusados,   icon: XCircle,      iconCls: "text-red-500",   bgCls: "bg-red-50"    },
         ].map((c, i) => (
           <motion.div
             key={c.label}
@@ -146,49 +198,51 @@ export function ValidarCertificadosPage() {
         )}
       </motion.div>
 
-      {/* Histórico */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.25 }}
-        className="bg-white rounded-xl border border-slate-100 shadow-sm"
-      >
-        <div className="flex items-center gap-2 p-5 border-b border-slate-50">
-          <FileText className="h-4 w-4 text-slate-400" />
-          <h2 className="text-base font-semibold text-slate-800">Histórico ({historico.length})</h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-50">
-                {["Aluno", "Título", "Área", "Status", "Observação"].map(h => (
-                  <th key={h} className="px-5 py-3 text-left text-xs font-medium text-slate-500">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {historico.map(cert => {
-                const s = getStatus(cert.statusValidacao);
-                return (
-                  <tr key={cert.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-5 py-4 font-medium text-slate-700">{cert.nomeAluno}</td>
-                    <td className="px-5 py-4 text-slate-600 max-w-50 truncate">{cert.tituloAtividade}</td>
-                    <td className="px-5 py-4 text-slate-500">{cert.nomeArea}</td>
-                    <td className="px-5 py-4">
-                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${s.className}`}>
-                        {s.label}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4 text-slate-400 text-xs">{cert.observacao ?? "—"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </motion.div>
+      {/* Histórico (validações feitas nesta sessão) */}
+      {historico.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 }}
+          className="bg-white rounded-xl border border-slate-100 shadow-sm"
+        >
+          <div className="flex items-center gap-2 p-5 border-b border-slate-50">
+            <FileText className="h-4 w-4 text-slate-400" />
+            <h2 className="text-base font-semibold text-slate-800">Validados nesta sessão ({historico.length})</h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-50">
+                  {["Aluno", "Título", "Área", "Status", "Observação"].map(h => (
+                    <th key={h} className="px-5 py-3 text-left text-xs font-medium text-slate-500">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {historico.map(cert => {
+                  const s = getStatus(cert.statusValidacao);
+                  return (
+                    <tr key={cert.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-5 py-4 font-medium text-slate-700">{cert.nomeAluno}</td>
+                      <td className="px-5 py-4 text-slate-600 max-w-50 truncate">{cert.tituloAtividade}</td>
+                      <td className="px-5 py-4 text-slate-500">{cert.nomeArea}</td>
+                      <td className="px-5 py-4">
+                        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${s.className}`}>
+                          {s.label}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4 text-slate-400 text-xs">{cert.observacao ?? "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </motion.div>
+      )}
 
-      {/* Modal */}
+      {/* Modal de Aprovar / Reprovar */}
       <AnimatePresence>
         {modal && (
           <motion.div
@@ -239,6 +293,8 @@ export function ValidarCertificadosPage() {
                     </label>
                     <input
                       type="number"
+                      min="1"
+                      max={modal.cert.cargaHorariaInformada}
                       value={horas}
                       onChange={e => setHoras(e.target.value)}
                       placeholder={`Máx: ${modal.cert.cargaHorariaInformada}h`}
