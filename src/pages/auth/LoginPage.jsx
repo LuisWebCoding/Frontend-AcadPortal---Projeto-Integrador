@@ -53,12 +53,12 @@ export function LoginPage() {
           <p className="text-blue-300 text-sm font-semibold uppercase tracking-wider">Credenciais de teste</p>
           <div className="space-y-2">
             {[
-              { tipo: "Aluno",       email: "aluno@teste.com"     },
-              { tipo: "Coordenador", email: "coordenador@teste.com" },
+              { tipo: "Aluno",       email: "joaopedro02@senac.com",                senha: "senac123" },
+              { tipo: "Coordenador", email: "mirandamonteiro2@senac.coordenacao.com", senha: "cord@123" },
             ].map(c => (
               <button
                 key={c.tipo}
-                onClick={() => { setEmail(c.email); setSenha("123"); }}
+                onClick={() => { setEmail(c.email); setSenha(c.senha); }}
                 className="w-full text-left p-3 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
               >
                 <p className="text-white text-xs font-semibold">{c.tipo}</p>
