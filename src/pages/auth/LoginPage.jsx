@@ -54,7 +54,7 @@ export function LoginPage() {
           <div className="space-y-2">
             {[
               { tipo: "Aluno",       email: "joaopedro02@senac.com",                senha: "senac123" },
-              { tipo: "Coordenador", email: "mirandamonteiro2@senac.coordenacao.com", senha: "cord@123" },
+              { tipo: "Coordenador", email: "mirandamonteiro2@senac.coordenacao.com", senha: "coord@123" },
             ].map(c => (
               <button
                 key={c.tipo}
