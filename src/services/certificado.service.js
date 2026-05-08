@@ -22,15 +22,16 @@ export async function listarAreas() {
   return data;
 }
 
-export async function listarPendentes() {
-  const { data } = await api.get('/api/certificados/pendentes');
-  return data;
+export async function listarFilaValidacao() {
+  const { data } = await api.get('/api/validacao/validar');
+  return data; // retorna { cards: { pendentes, aprovados, recusados }, lista: [...] }
 }
 
-export async function validarCertificado(id, status, horasValidadas) {
-  const { data } = await api.patch(`/api/certificados/${id}/validar`, {
+export async function validarCertificado(idValidacao, status, horasValidadas, observacao) {
+  const { data } = await api.patch(`/api/validacao/validar/${idValidacao}`, {
     status,
-    horasValidadas: status === 'APROVADO' ? Number(horasValidadas) : 0,
+    horasValidadas: status === 'APROVADO' ? Number(horasValidadas || 0) : 0,
+    observacao: observacao || null,
   });
   return data;
 }

@@ -1,56 +1,127 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ShieldCheck, Clock, CheckCircle, XCircle, FileText, X, Loader2 } from "lucide-react";
-import { mockTodosCertificados } from "@/services/mock";
-import { aprovarCertificado, reprovarCertificado } from "@/services/validacao.service";
+import { ShieldCheck, Clock, CheckCircle, XCircle, FileText, X, Loader2, Search } from "lucide-react";
+import { listarFilaValidacao, validarCertificado } from "@/services/certificado.service";
+import api from "@/services/api";
 import toast from "react-hot-toast";
 
 const STATUS = {
   APROVADO:  { label: "Aprovado",  className: "bg-green-100 text-green-700"  },
+  RECUSADO:  { label: "Recusado",  className: "bg-red-100 text-red-700"      },
   REPROVADO: { label: "Reprovado", className: "bg-red-100 text-red-700"      },
 };
 const getStatus = (s) =>
   s ? (STATUS[s] ?? { label: s, className: "bg-slate-100 text-slate-600" })
     : { label: "Pendente", className: "bg-amber-100 text-amber-700" };
 
-export function ValidarCertificadosPage() {
-  const [certificados, setCertificados] = useState(mockTodosCertificados);
-  const [modal, setModal]     = useState(null); // { tipo: 'aprovar'|'reprovar', cert }
-  const [horas, setHoras]     = useState("");
-  const [obs, setObs]         = useState("");
-  const [loading, setLoading] = useState(false);
+// Normaliza o objeto vindo do backend para o formato usado internamente
+function normalizarCertificado(c) {
+  return {
+    id:                    c.id,
+    validacaoId:           c.validacao?.id ?? null,
+    tituloAtividade:       c.tituloAtividade,
+    cargaHorariaInformada: c.cargaHorariaInformada,
+    dataEnvio:             c.dataEnvio
+      ? new Date(c.dataEnvio).toLocaleDateString("pt-BR")
+      : "—",
+    nomeAluno:             c.nomeAluno ?? c.aluno?.nome ?? "—",
+    nomeArea:              c.nomeArea  ?? c.area?.nome  ?? "—",
+    statusValidacao:       c.statusValidacao ?? c.validacao?.status ?? null,
+    observacao:            c.observacao      ?? c.validacao?.observacao ?? null,
+  };
+}
 
-  const pendentes = certificados.filter(c => !c.statusValidacao);
-  const historico = certificados.filter(c =>  c.statusValidacao);
+export function ValidarCertificadosPage() {
+  const [pendentes,  setPendentes]  = useState([]);
+  const [historico,  setHistorico]  = useState([]);
+  const [carregando, setCarregando] = useState(true);
+  const [modal,      setModal]      = useState(null); // { tipo: 'aprovar'|'reprovar', cert }
+  const [horas,      setHoras]      = useState("");
+  const [obs,        setObs]        = useState("");
+  const [loading,    setLoading]    = useState(false);
+  const [aprovados, setAprovados] = useState(0);
+  const [recusados, setRecusados] = useState(0);
+  const [matricula, setMatricula]       = useState("");
+  const [alunoResult, setAlunoResult]   = useState(null);
+  const [buscando, setBuscando]         = useState(false);
+  const [erroMatricula, setErroMatricula] = useState(null);
+
+  // ── Carrega pendentes do backend ──────────────────────────────
+  useEffect(() => {
+  const carregar = async () => {
+    try {
+      const dados = await listarFilaValidacao();
+      const lista = Array.isArray(dados.lista) ? dados.lista : [];
+      setPendentes(lista.map(normalizarCertificado));
+      setAprovados(dados.cards?.aprovados ?? 0);
+      setRecusados(dados.cards?.recusados ?? 0);
+    } catch {
+      toast.error("Erro ao carregar certificados pendentes.");
+    } finally {
+      setCarregando(false);
+    }
+  };
+  carregar();
+}, []);
 
   function abrirModal(tipo, cert) { setModal({ tipo, cert }); setHoras(""); setObs(""); }
-  function fecharModal() { setModal(null); }
+  function fecharModal()          { setModal(null); }
+
+  async function buscarAluno() {
+  if (!matricula.trim()) return;
+  setBuscando(true);
+  setErroMatricula(null);
+  setAlunoResult(null);
+  try {
+    const { data } = await api.get(`/api/validacao/aluno/${matricula.trim()}`);
+    setAlunoResult(data);
+  } catch (err) {
+    setErroMatricula(err?.response?.data?.erro ?? "Aluno não encontrado.");
+  } finally {
+    setBuscando(false);
+  }
+}
 
   async function confirmar() {
-    setLoading(true);
-    try {
-      if (modal.tipo === "aprovar") {
-        await aprovarCertificado(modal.cert.id, Number(horas), obs);
-        setCertificados(prev =>
-          prev.map(c => c.id === modal.cert.id ? { ...c, statusValidacao: "APROVADO", observacao: obs } : c)
-        );
-        toast.success("Certificado aprovado!");
-      } else {
-        await reprovarCertificado(modal.cert.id, obs);
-        setCertificados(prev =>
-          prev.map(c => c.id === modal.cert.id ? { ...c, statusValidacao: "RECUSADO", observacao: obs } : c)
-        );
-        toast.success("Certificado reprovado.");
-      }
-      fecharModal();
-    } catch {
-      toast.error("Erro ao processar.");
+  setLoading(true);
+  try {
+    if (modal.tipo === "aprovar") {
+      await validarCertificado(modal.cert.validacaoId, "APROVADO", Number(horas), obs);
+      const aprovado = { ...modal.cert, statusValidacao: "APROVADO", observacao: obs || null };
+      setPendentes(prev => prev.filter(c => c.id !== modal.cert.id));
+      setHistorico(prev => [aprovado, ...prev]);
+      setAprovados(prev => prev + 1);
+      toast.success("Certificado aprovado!");
+    } else {
+      await validarCertificado(modal.cert.validacaoId, "RECUSADO", 0, obs);
+      const recusado = { ...modal.cert, statusValidacao: "RECUSADO", observacao: obs };
+      setPendentes(prev => prev.filter(c => c.id !== modal.cert.id));
+      setHistorico(prev => [recusado, ...prev]);
+      setRecusados(prev => prev + 1);
+      toast.success("Certificado reprovado.");
     }
-    setLoading(false);
+    fecharModal();
+  } catch {
+    toast.error("Erro ao processar. Tente novamente.");
   }
+  setLoading(false);
+}
 
   const canConfirm = modal && !loading &&
     (modal.tipo === "aprovar" ? !!horas : !!obs);
+
+  // ── Loading inicial ───────────────────────────────────────────
+  if (carregando) {
+    return (
+      <div className="flex items-center justify-center h-64 gap-2 text-slate-400">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        <span className="text-sm">Carregando certificados...</span>
+      </div>
+    );
+  }
+
+  const totalAprovados = historico.filter(c => c.statusValidacao === "APROVADO").length;
+  const totalRecusados = historico.filter(c => c.statusValidacao === "RECUSADO" || c.statusValidacao === "REPROVADO").length;
 
   return (
     <div className="space-y-6">
@@ -59,13 +130,82 @@ export function ValidarCertificadosPage() {
         <h1 className="text-2xl font-bold text-slate-800">Validar Certificados</h1>
         <p className="text-slate-500 text-sm mt-1">Revise e valide os certificados enviados pelos alunos.</p>
       </div>
+      {/* Buscar Situação */}
+<motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+  className="bg-white rounded-xl p-6 border border-slate-100 shadow-sm">
+  <h2 className="text-base font-semibold text-slate-800 mb-4">Buscar Situação</h2>
+  <div className="flex gap-3">
+    <input
+      type="text"
+      value={matricula}
+      onChange={e => setMatricula(e.target.value)}
+      onKeyDown={e => e.key === "Enter" && buscarAluno()}
+      placeholder="Digite a matrícula do aluno"
+      className="flex-1 h-10 px-3 rounded-lg border border-slate-200 bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-[#004587] focus:border-transparent"
+    />
+    <button onClick={buscarAluno} disabled={buscando}
+      className="px-4 py-2 bg-[#004587] hover:bg-[#003566] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center gap-2">
+      {buscando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+      Buscar Aluno
+    </button>
+  </div>
 
+  {erroMatricula && (
+    <p className="text-sm text-red-500 mt-3">{erroMatricula}</p>
+  )}
+
+  {alunoResult && (
+    <div className="mt-5 space-y-3">
+      <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
+        <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center text-[#004587] font-bold text-sm">
+          {alunoResult.nome?.charAt(0)}
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-slate-800">{alunoResult.nome}</p>
+          <p className="text-xs text-slate-400">{alunoResult.email} · Matrícula: {alunoResult.matricula}</p>
+        </div>
+      </div>
+
+      {alunoResult.certificados?.length === 0 ? (
+        <p className="text-sm text-slate-400">Nenhum certificado enviado.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-50">
+                {["Título", "Área", "Horas", "Status", "Observação"].map(h => (
+                  <th key={h} className="px-3 py-2 text-left text-xs font-medium text-slate-500">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {alunoResult.certificados.map(cert => {
+                const s = getStatus(cert.validacao?.status);
+                return (
+                  <tr key={cert.id} className="hover:bg-slate-50">
+                    <td className="px-3 py-3 font-medium text-slate-700">{cert.tituloAtividade}</td>
+                    <td className="px-3 py-3 text-slate-500">{cert.area?.nome ?? "—"}</td>
+                    <td className="px-3 py-3 text-slate-700">{cert.cargaHorariaInformada}h</td>
+                    <td className="px-3 py-3">
+                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${s.className}`}>{s.label}</span>
+                    </td>
+                    <td className="px-3 py-3 text-slate-400 text-xs">{cert.validacao?.observacao ?? "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )}
+</motion.div>
       {/* Cards de resumo */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
-          { label: "Pendentes",  valor: pendentes.length,  icon: Clock,        iconCls: "text-amber-600", bgCls: "bg-amber-50"  },
-          { label: "Aprovados",  valor: historico.filter(c => c.statusValidacao === "APROVADO").length,  icon: CheckCircle, iconCls: "text-green-600", bgCls: "bg-green-50" },
-          { label: "Recusados", valor: historico.filter(c => c.statusValidacao === "RECUSADO").length, icon: XCircle,     iconCls: "text-red-500",   bgCls: "bg-red-50"   },
+          { label: "Pendentes",  valor: pendentes.length, icon: Clock,        iconCls: "text-amber-600", bgCls: "bg-amber-50"  },
+          { label: "Aprovados",  valor: aprovados,   icon: CheckCircle,  iconCls: "text-green-600", bgCls: "bg-green-50"  },
+          { label: "Recusados",  valor: recusados,   icon: XCircle,      iconCls: "text-red-500",   bgCls: "bg-red-50"    },
         ].map((c, i) => (
           <motion.div
             key={c.label}
@@ -146,49 +286,51 @@ export function ValidarCertificadosPage() {
         )}
       </motion.div>
 
-      {/* Histórico */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.25 }}
-        className="bg-white rounded-xl border border-slate-100 shadow-sm"
-      >
-        <div className="flex items-center gap-2 p-5 border-b border-slate-50">
-          <FileText className="h-4 w-4 text-slate-400" />
-          <h2 className="text-base font-semibold text-slate-800">Histórico ({historico.length})</h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-50">
-                {["Aluno", "Título", "Área", "Status", "Observação"].map(h => (
-                  <th key={h} className="px-5 py-3 text-left text-xs font-medium text-slate-500">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {historico.map(cert => {
-                const s = getStatus(cert.statusValidacao);
-                return (
-                  <tr key={cert.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-5 py-4 font-medium text-slate-700">{cert.nomeAluno}</td>
-                    <td className="px-5 py-4 text-slate-600 max-w-50 truncate">{cert.tituloAtividade}</td>
-                    <td className="px-5 py-4 text-slate-500">{cert.nomeArea}</td>
-                    <td className="px-5 py-4">
-                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${s.className}`}>
-                        {s.label}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4 text-slate-400 text-xs">{cert.observacao ?? "—"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </motion.div>
+      {/* Histórico (validações feitas nesta sessão) */}
+      {historico.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 }}
+          className="bg-white rounded-xl border border-slate-100 shadow-sm"
+        >
+          <div className="flex items-center gap-2 p-5 border-b border-slate-50">
+            <FileText className="h-4 w-4 text-slate-400" />
+            <h2 className="text-base font-semibold text-slate-800">Validados nesta sessão ({historico.length})</h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-50">
+                  {["Aluno", "Título", "Área", "Status", "Observação"].map(h => (
+                    <th key={h} className="px-5 py-3 text-left text-xs font-medium text-slate-500">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {historico.map(cert => {
+                  const s = getStatus(cert.statusValidacao);
+                  return (
+                    <tr key={cert.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-5 py-4 font-medium text-slate-700">{cert.nomeAluno}</td>
+                      <td className="px-5 py-4 text-slate-600 max-w-50 truncate">{cert.tituloAtividade}</td>
+                      <td className="px-5 py-4 text-slate-500">{cert.nomeArea}</td>
+                      <td className="px-5 py-4">
+                        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${s.className}`}>
+                          {s.label}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4 text-slate-400 text-xs">{cert.observacao ?? "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </motion.div>
+      )}
 
-      {/* Modal */}
+      {/* Modal de Aprovar / Reprovar */}
       <AnimatePresence>
         {modal && (
           <motion.div
@@ -239,6 +381,8 @@ export function ValidarCertificadosPage() {
                     </label>
                     <input
                       type="number"
+                      min="1"
+                      max={modal.cert.cargaHorariaInformada}
                       value={horas}
                       onChange={e => setHoras(e.target.value)}
                       placeholder={`Máx: ${modal.cert.cargaHorariaInformada}h`}

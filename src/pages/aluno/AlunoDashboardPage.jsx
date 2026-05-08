@@ -14,12 +14,13 @@ export function AlunoDashboardPage() {
   const [dashboard, setDashboard]   = useState(null);
   const [recentes, setRecentes]     = useState([]);
   const [carregando, setCarregando] = useState(true);
+  const [modalCert, setModalCert] = useState(null);
 
   useEffect(() => {
     const carregarDados = async () => {
       try {
         const [dash, certsRes] = await Promise.all([
-          api.get("/api/dashboard").then(r => r.data),
+          api.get("/api/dashboard/aluno").then(r => r.data),
           listarMeusCertificados(),
         ]);
         setDashboard(dash);
@@ -37,7 +38,7 @@ export function AlunoDashboardPage() {
   const totalExigido   = dashboard?.totalExigido   ?? 200;
   const horasConcluidas = dashboard?.horasConcluidas ?? 0;
   const horasFaltantes  = Math.max(0, totalExigido - horasConcluidas);
-  const pct = Math.min(100, Math.round((horasConcluidas / totalExigido) * 200));
+  const pct = Math.min(100, Math.round((horasConcluidas / totalExigido) * 100));
   const distribuicao = dashboard?.distribuicaoPorAtividade ?? [];
 
   const primeiroNome = user?.nome?.split(" ")[0] ?? "Aluno";
@@ -163,43 +164,90 @@ export function AlunoDashboardPage() {
       </div>
 
       {/* Atividades recentes */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
-        className="bg-white rounded-xl border border-slate-100 shadow-sm">
-        <div className="flex items-center justify-between p-5 border-b border-slate-50">
-          <h2 className="text-base font-semibold text-slate-800">Atividades Recentes</h2>
-          <button onClick={() => navigate("/aluno/horas")}
-            className="text-sm text-[#004587] hover:underline font-medium">
-            Ver todas as atividades
-          </button>
+      {/* Atividades recentes */}
+<motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+  className="bg-white rounded-xl border border-slate-100 shadow-sm">
+  <div className="flex items-center justify-between p-5 border-b border-slate-50">
+    <h2 className="text-base font-semibold text-slate-800">Atividades Recentes</h2>
+    <button onClick={() => navigate("/aluno/horas")}
+      className="text-sm text-[#004587] hover:underline font-medium">
+      Ver todas as atividades
+    </button>
+  </div>
+  <div className="divide-y divide-slate-50">
+    {recentes.length === 0 ? (
+      <p className="p-5 text-sm text-slate-400">Nenhuma atividade enviada ainda.</p>
+    ) : recentes.map(cert => {
+      const s = getStatusChip(cert.validacao);
+      const dataEnvio = cert.dataEnvio
+        ? new Date(cert.dataEnvio).toLocaleDateString("pt-BR")
+        : "—";
+      return (
+        <div key={cert.id} onClick={() => setModalCert(cert)}
+          className="flex items-center gap-4 px-5 py-4 hover:bg-slate-50 transition-colors cursor-pointer">
+          <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+            <FileText className="h-4 w-4 text-[#004587]" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-slate-700 truncate">{cert.tituloAtividade}</p>
+            <p className="text-xs text-slate-400">{cert.area?.nome ?? "—"}</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${s.className}`}>{s.label}</span>
+            <span className="text-xs text-slate-400">{cert.cargaHorariaInformada}h</span>
+            <span className="text-xs text-slate-400">{dataEnvio}</span>
+            <ChevronRight className="h-4 w-4 text-slate-300" />
+          </div>
         </div>
-        <div className="divide-y divide-slate-50">
-          {recentes.length === 0 ? (
-            <p className="p-5 text-sm text-slate-400">Nenhuma atividade enviada ainda.</p>
-          ) : recentes.map(cert => {
-            const s = getStatusChip(cert.validacao);
-            const dataEnvio = cert.dataEnvio
-              ? new Date(cert.dataEnvio).toLocaleDateString("pt-BR")
-              : "—";
-            return (
-              <div key={cert.id} className="flex items-center gap-4 px-5 py-4 hover:bg-slate-50 transition-colors">
-                <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
-                  <FileText className="h-4 w-4 text-[#004587]" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-700 truncate">{cert.tituloAtividade}</p>
-                  <p className="text-xs text-slate-400">{cert.area?.nome ?? "—"}</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${s.className}`}>{s.label}</span>
-                  <span className="text-xs text-slate-400">{cert.cargaHorariaInformada}h</span>
-                  <span className="text-xs text-slate-400">{dataEnvio}</span>
-                  <ChevronRight className="h-4 w-4 text-slate-300" />
-                </div>
-              </div>
-            );
-          })}
+      );
+    })}
+  </div>
+</motion.div>
+
+{/* Modal detalhes do certificado */}
+{modalCert && (
+  <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+    onClick={() => setModalCert(null)}>
+    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6"
+      onClick={e => e.stopPropagation()}>
+      <div className="flex items-start justify-between mb-4">
+        <h3 className="text-base font-semibold text-slate-800">{modalCert.tituloAtividade}</h3>
+        <button onClick={() => setModalCert(null)}
+          className="p-1 rounded-lg hover:bg-slate-100 transition-colors">
+          <ChevronRight className="h-4 w-4 text-slate-400 rotate-180" />
+        </button>
+      </div>
+      <div className="space-y-3 text-sm">
+        <div className="flex justify-between">
+          <span className="text-slate-500">Área: </span>
+          <span className="text-slate-700 font-medium">{modalCert.area?.nome ?? "—"}</span>
         </div>
-      </motion.div>
+        <div className="flex justify-between">
+          <span className="text-slate-500">Horas informadas</span>
+          <span className="text-slate-700 font-medium">{modalCert.cargaHorariaInformada}h</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-slate-500">Horas validadas</span>
+          <span className="text-slate-700 font-medium">{modalCert.validacao?.horasValidadas ?? "—"}h</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-slate-500">Status</span>
+          <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${getStatusChip(modalCert.validacao).className}`}>
+            {getStatusChip(modalCert.validacao).label}
+          </span>
+        </div>
+        {modalCert.validacao?.observacao && (
+          <div className="pt-2 border-t border-slate-100">
+            <p className="text-slate-500 mb-1">Observação do coordenador</p>
+            <p className="text-slate-700 bg-slate-50 rounded-lg p-3 text-xs leading-relaxed">
+              {modalCert.validacao.observacao}
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+)}
 
       {/* Info */}
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }}
