@@ -16,12 +16,21 @@ const getStatus = (s) =>
     : { label: "Pendente", className: "bg-amber-100 text-amber-700" };
 
 function normalizarCertificado(c) {
+  // 1. Pegamos a URL que veio do banco (mesmo que esteja errada)
+  let urlCorrigida = c.arquivoImagem;
+
+  // 2. A MÁGICA: O JavaScript intercepta o erro e arruma o link na velocidade da luz!
+  if (urlCorrigida && urlCorrigida.includes('.storage.supabase.co')) {
+    urlCorrigida = urlCorrigida.replace('.storage.supabase.co', '.supabase.co/storage/v1/object/public');
+  }
+
+  // 3. Devolvemos o objeto perfeito para a tela
   return {
     id:                    c.id,
     validacaoId:           c.validacao?.id ?? null,
     tituloAtividade:       c.tituloAtividade,
     cargaHorariaInformada: c.cargaHorariaInformada,
-    arquivoImagem:         c.arquivoImagem ?? null,
+    arquivoImagem:         urlCorrigida, // <--- Aqui o botão "Ver" vai receber o link consertado!
     dataEnvio:             c.dataEnvio
       ? new Date(c.dataEnvio).toLocaleDateString("pt-BR")
       : "—",
