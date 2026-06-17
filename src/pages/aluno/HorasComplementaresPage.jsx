@@ -1,91 +1,68 @@
-import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Upload, FileText, CheckCircle, Clock, Loader2 } from "lucide-react";
-import { listarMeusCertificados, enviarCertificado, listarAreas } from "@/services/certificado.service";
-import toast from "react-hot-toast";
+import { CheckCircle, Clock, FileText } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 
-const STATUS = {
-  APROVADO: { label: "Aprovado", className: "bg-green-100 text-green-700" },
-  RECUSADO: { label: "Recusado", className: "bg-red-100 text-red-700" },
-  PENDENTE: { label: "Pendente", className: "bg-amber-100 text-amber-700" },
-};
-const getStatus = (s) =>
-  s ? (STATUS[s] ?? { label: s, className: "bg-slate-100 text-slate-600" })
-    : { label: "Pendente", className: "bg-amber-100 text-amber-700" };
+// Componentes Reutilizáveis
+import { StatsCard } from "@/components/dashboard/StatsCard";
+import { CertificateTable } from "@/components/certificates/CertificateTable";
+import { UploadForm } from "@/components/certificates/UploadForm";
+
+// Hooks React Query
+import { useMeusCertificados, useAreas, useEnviarCertificado } from "@/hooks/useCertificados";
 
 const META = 100;
 
 export function HorasComplementaresPage() {
-  const [certs, setCerts]           = useState([]);
-  const [resumo, setResumo]         = useState(null);
-  const [carregando, setCarregando] = useState(true);
-  const [arquivo, setArquivo]       = useState(null);
-  const [enviando, setEnviando]     = useState(false);
-  const [areas, setAreas]           = useState([]);
-  const [form, setForm] = useState({
-    tituloAtividade: "",
-    cargaHorariaInformada: "",
-    dataAtividade: "",
-    areaId: "",
-  });
+  const { user } = useAuth();
+  const { data: certsData, isLoading: loadingCerts } = useMeusCertificados();
+  const { data: areas = [], isLoading: loadingAreas }   = useAreas();
+  const mutationEnviar = useEnviarCertificado();
 
-  // Função auxiliar para atualizar certs e resumo a partir da resposta
-  const atualizarLista = (res) => {
-    setCerts(Array.isArray(res) ? res : (res?.certificados ?? []));
-    setResumo(res?.resumo ?? null);
-  };
+  const certs  = Array.isArray(certsData) ? certsData : (certsData?.certificados ?? []);
+  const resumo = certsData?.resumo ?? null;
 
-  useEffect(() => {
-    listarMeusCertificados()
-      .then(atualizarLista)
-      .catch(() => toast.error("Erro ao carregar certificados."))
-      .finally(() => setCarregando(false));
-  }, []);
-
-  useEffect(() => {
-    listarAreas()
-      .then(setAreas)
-      .catch(() => toast.error("Erro ao carregar áreas."));
-  }, []);
-
-  const horasAprovadas = resumo?.horasValidadas ?? 0;
-
-  const horasPendentes = certs
-    .filter(c => !c.validacao?.status || c.validacao.status === "PENDENTE")
-    .reduce((a, c) => a + Number(c.cargaHorariaInformada), 0);
-
-  const pct = Math.min(100, Math.round((horasAprovadas / META) * 100));
-
-  const handleForm = (e) => setForm({ ...form, [e.target.name]: e.target.value });
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!arquivo) { toast.error("Selecione um arquivo"); return; }
-    setEnviando(true);
+  const handleUpload = async (form, arquivo) => {
     try {
-      await enviarCertificado(
-        {
+      await mutationEnviar.mutateAsync({
+        dados: {
           ...form,
           areaId: Number(form.areaId),
+          subcategoriaId: Number(form.subcategoriaId),
+          cursoId: Number(user?.cursoId || 1), // Tenta pegar do user, senão usa 1 como fallback (ADS)
           cargaHorariaInformada: Number(form.cargaHorariaInformada),
         },
         arquivo
-      );
-      const res = await listarMeusCertificados();
-      atualizarLista(res); // ← usa a mesma função auxiliar, nunca quebra
-      setForm({ tituloAtividade: "", cargaHorariaInformada: "", dataAtividade: "", areaId: "" });
-      setArquivo(null);
-      toast.success("Certificado enviado com sucesso!");
-    } catch (err) {
-      toast.error(err?.response?.data?.erro ?? "Erro ao enviar certificado.");
-    } finally {
-      setEnviando(false);
+      });
+      return true;
+    } catch {
+      return false;
     }
   };
 
-  const nomeArea   = (cert) => cert.area?.nome ?? "—";
-  const statusVal  = (cert) => cert.validacao?.status ?? null;
-  const observacao = (cert) => cert.validacao?.observacao ?? null;
+  const getCertStatus = (c) => (c.validacao?.status || c.statusValidacao || c.status || "PENDENTE").toUpperCase();
+
+  const horasAprovadas = resumo?.horasValidadas ?? 0;
+  const horasPendentes = certs
+    .filter(c => getCertStatus(c) === "PENDENTE")
+    .reduce((a, c) => a + Number(c.cargaHorariaInformada || 0), 0);
+  const pct = Math.min(100, Math.round((horasAprovadas / META) * 100));
+
+  const columns = [
+    { label: "Título", key: "tituloAtividade" },
+    { label: "Área", key: "area", render: (c) => c.area?.nome ?? "—" },
+    { 
+      label: "Data de Envio", 
+      key: "dataEnvio", 
+      render: (c) => c.dataEnvio ? new Date(c.dataEnvio).toLocaleDateString("pt-BR") : "—" 
+    },
+    { label: "Horas", key: "cargaHorariaInformada", render: (c) => `${c.cargaHorariaInformada}h` },
+    { label: "Status", key: "status" }, // Deixa o CertificateTable cuidar do estilo
+    { 
+      label: "Observação", 
+      key: "observacao", 
+      render: (c) => <span className="text-slate-400 text-xs">{c.validacao?.observacao ?? "—"}</span> 
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -94,138 +71,72 @@ export function HorasComplementaresPage() {
         <p className="text-slate-500 text-sm mt-1">Envie seus certificados e acompanhe a validação.</p>
       </div>
 
-      {/* Cards métricas */}
-      <div className="grid grid-cols-3 gap-4">
-        {[
-          { label: "Horas Aprovadas", valor: `${horasAprovadas}h`, icon: CheckCircle, cls: "text-green-600", bg: "bg-green-50" },
-          { label: "Horas Pendentes", valor: `${horasPendentes}h`, icon: Clock,       cls: "text-amber-600", bg: "bg-amber-50" },
-          { label: "Meta do Curso",   valor: `${META}h`,           icon: FileText,    cls: "text-[#004587]", bg: "bg-blue-50"  },
-        ].map((c, i) => (
-          <motion.div key={c.label} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
-            className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm flex items-center gap-4">
-            <div className={`w-10 h-10 rounded-full ${c.bg} flex items-center justify-center shrink-0`}>
-              <c.icon className={`h-5 w-5 ${c.cls}`} />
-            </div>
-            <div>
-              <p className="text-xs text-slate-500">{c.label}</p>
-              <p className={`text-2xl font-bold ${c.cls}`}>{c.valor}</p>
-            </div>
-          </motion.div>
-        ))}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatsCard 
+          label="Horas Aprovadas" 
+          valor={`${horasAprovadas}h`} 
+          icon={CheckCircle} 
+          iconClassName="text-green-600" 
+          bgClassName="bg-green-50" 
+          delay={0}
+        />
+        <StatsCard 
+          label="Horas Pendentes" 
+          valor={`${horasPendentes}h`} 
+          icon={Clock} 
+          iconClassName="text-amber-600" 
+          bgClassName="bg-amber-50" 
+          delay={0.05}
+        />
+        <StatsCard 
+          label="Meta do Curso" 
+          valor={`${META}h`} 
+          icon={FileText} 
+          iconClassName="text-[#004587]" 
+          bgClassName="bg-blue-50" 
+          delay={0.1}
+        />
       </div>
 
-      {/* Barra progresso */}
-      <div className="bg-white rounded-xl p-5 border border-slate-100 shadow-sm">
-        <div className="flex justify-between text-sm mb-2">
-          <span className="font-medium text-slate-700">Progresso geral</span>
-          <span className="text-slate-500">{horasAprovadas}/{META}h · {pct}%</span>
-        </div>
-        <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
-          <motion.div initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.8, ease: "easeOut" }}
-            className="h-full bg-[#004587] rounded-full" />
-        </div>
-      </div>
-
-      {/* Formulário */}
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}
-        className="bg-white rounded-xl p-6 border border-slate-100 shadow-sm">
-        <h2 className="text-base font-semibold text-slate-800 mb-5 flex items-center gap-2">
-          <Upload className="h-4 w-4" /> Enviar Certificado
-        </h2>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            {[
-              { label: "Título da Atividade", name: "tituloAtividade",       type: "text",   ph: "Ex: Workshop de Design Thinking" },
-              { label: "Carga Horária (h)",   name: "cargaHorariaInformada", type: "number", ph: "Ex: 20" },
-              { label: "Data da Atividade",   name: "dataAtividade",         type: "date",   ph: "" },
-            ].map(f => (
-              <div key={f.name}>
-                <label className="text-xs font-medium text-slate-600 block mb-1.5">{f.label}</label>
-                <input required name={f.name} type={f.type} value={form[f.name]} onChange={handleForm} placeholder={f.ph}
-                  className="w-full h-10 px-3 rounded-lg border border-slate-200 bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-[#004587] focus:border-transparent" />
-              </div>
-            ))}
-            <div>
-              <label className="text-xs font-medium text-slate-600 block mb-1.5">Área de Atividade</label>
-              <select required name="areaId" value={form.areaId} onChange={handleForm}
-                className="w-full h-10 px-3 rounded-lg border border-slate-200 bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-[#004587] focus:border-transparent">
-                <option value="">Selecione uma área</option>
-                {areas.map(a => <option key={a.id} value={a.id}>{a.nome}</option>)}
-              </select>
-            </div>
-          </div>
-
+      <div className="bg-white rounded-xl p-6 border border-slate-100 shadow-sm">
+        <div className="flex justify-between items-end mb-3">
           <div>
-            <label className="text-xs font-medium text-slate-600 block mb-1.5">Comprovante (PDF ou imagem)</label>
-            <label htmlFor="arq" className="flex flex-col items-center gap-2 p-6 rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 cursor-pointer hover:border-[#004587] hover:bg-blue-50 transition-colors">
-              <Upload className="h-6 w-6 text-slate-400" />
-              <p className="text-sm text-slate-500">{arquivo ? arquivo.name : "Clique para escolher ou arraste o arquivo"}</p>
-              <p className="text-xs text-slate-400">PDF, JPG ou PNG · max 10MB</p>
-              <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => setArquivo(e.target.files[0])} className="hidden" id="arq" />
-            </label>
+            <p className="text-xs font-bold text-[#004587] uppercase tracking-wider mb-1">Seu Progresso</p>
+            <h3 className="text-slate-500 text-sm font-medium">Progresso geral do curso</h3>
           </div>
+          <span className="text-slate-900 font-bold text-sm bg-blue-50 px-3 py-1 rounded-lg">
+            {horasAprovadas}/{META}h · <span className="text-[#004587]">{pct}%</span>
+          </span>
+        </div>
+        <div className="h-3 bg-slate-100 rounded-full overflow-hidden shadow-inner">
+          <motion.div 
+            initial={{ width: 0 }} 
+            animate={{ width: `${pct}%` }} 
+            transition={{ duration: 1, ease: "easeOut" }}
+            className="h-full bg-gradient-to-r from-[#004587] to-blue-500 rounded-full shadow-sm" 
+          />
+        </div>
+      </div>
 
-          <button type="submit" disabled={enviando}
-            className="px-6 py-2.5 bg-[#004587] hover:bg-[#003566] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center gap-2">
-            {enviando
-              ? <><Loader2 className="h-4 w-4 animate-spin" /> Enviando...</>
-              : <><Upload className="h-4 w-4" /> Enviar Certificado</>}
-          </button>
-        </form>
-      </motion.div>
+      <UploadForm 
+        areas={areas} 
+        onSubmit={handleUpload} 
+        isSubmitting={mutationEnviar.isPending} 
+      />
 
-      {/* Tabela */}
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}
-        className="bg-white rounded-xl border border-slate-100 shadow-sm">
+      <div className="bg-white rounded-xl border border-slate-100 shadow-sm">
         <div className="p-5 border-b border-slate-50">
           <h2 className="text-base font-semibold text-slate-800">
-            Certificados Enviados {!carregando && `(${certs.length})`}
+            Certificados Enviados {!loadingCerts && `(${certs.length})`}
           </h2>
         </div>
-
-        {carregando ? (
-          <div className="flex items-center justify-center p-10 gap-2 text-slate-400">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            <span className="text-sm">Carregando...</span>
-          </div>
-        ) : certs.length === 0 ? (
-          <div className="p-10 text-center text-slate-400 text-sm">
-            Nenhum certificado enviado ainda.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-50">
-                  {["Título", "Área", "Data de Envio", "Horas", "Status", "Observação"].map(h => (
-                    <th key={h} className="px-5 py-3 text-left text-xs font-medium text-slate-500">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {certs.map(cert => {
-                  const s = getStatus(statusVal(cert));
-                  const dataEnvio = cert.dataEnvio
-                    ? new Date(cert.dataEnvio).toLocaleDateString("pt-BR")
-                    : "—";
-                  return (
-                    <tr key={cert.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-5 py-4 font-medium text-slate-700">{cert.tituloAtividade}</td>
-                      <td className="px-5 py-4 text-slate-500">{nomeArea(cert)}</td>
-                      <td className="px-5 py-4 text-slate-500">{dataEnvio}</td>
-                      <td className="px-5 py-4 font-medium">{cert.cargaHorariaInformada}h</td>
-                      <td className="px-5 py-4">
-                        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${s.className}`}>{s.label}</span>
-                      </td>
-                      <td className="px-5 py-4 text-slate-400 text-xs">{observacao(cert) ?? "—"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </motion.div>
+        <CertificateTable 
+          certificates={certs} 
+          loading={loadingCerts} 
+          columns={columns}
+          emptyMessage="Nenhum certificado enviado ainda."
+        />
+      </div>
     </div>
   );
 }

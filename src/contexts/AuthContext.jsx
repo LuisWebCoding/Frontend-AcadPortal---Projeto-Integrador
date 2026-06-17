@@ -21,7 +21,8 @@ export function AuthProvider({ children }) {
 
   async function login(email, senha) {
     const data = await loginService(email, senha);
-    setUser({ id: data.id, nome: data.nome, perfil: data.perfil });
+    // data: { id, nome, perfil, cursoId, ... }
+    setUser({ ...data }); 
     return data;
   }
 

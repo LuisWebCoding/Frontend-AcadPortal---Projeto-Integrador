@@ -4,13 +4,16 @@ export async function enviarCertificado(dados, arquivo) {
   const formData = new FormData();
   formData.append('tituloAtividade',       dados.tituloAtividade);
   formData.append('cargaHorariaInformada', String(dados.cargaHorariaInformada));
-  formData.append('dataAtividade',         new Date(dados.dataAtividade).toISOString()); // ← fix
-  formData.append('areaId',               String(dados.areaId));
-  formData.append('arquivo',              arquivo);
+  formData.append('dataAtividade',         dados.dataAtividade);
+  formData.append('areaId',                String(dados.areaId)); 
+  formData.append('subcategoriaId',        String(dados.subcategoriaId));
+  formData.append('cursoId',               String(dados.cursoId));
+  formData.append('arquivo',               arquivo);
 
-  const { data } = await api.post('/api/certificados/enviar', formData); // ← sem headers
+  const { data } = await api.post('/api/certificados/enviar', formData);
   return data;
 }
+
 
 export async function listarMeusCertificados() {
   const { data } = await api.get('/api/certificados/meus');
